@@ -1,0 +1,59 @@
+import Template_classifying.documents_classification as clf
+
+
+train_path = '/home/dim/PycharmProjects/dxtract-ml/Template_classifying/' \
+             'Samples_label'
+test_path = '/home/dim/PycharmProjects/dxtract-ml/Template_classifying/' \
+            'test_data'
+
+
+train_dataset = clf.Dataset()
+train_dataset.load_dataset(train_path, is_train=True)
+
+# Initialize classifier and fit vectorizer with raw train data
+classifier = clf.DocumentsClassifier()
+classifier.fit_vectorizer(train_dataset.data)
+
+# Vectorize raw train data and fit classifier
+vectorized_train_data = classifier.vectorize(train_dataset.data)
+classifier.fit_classifier(vectorized_train_data, train_dataset.target)
+
+# Run classifier on train dataset
+predictions_dict = classifier.predict(vectorized_train_data)
+
+print('Predictions:\n', predictions_dict['predictions'], '\n')
+print('Class probabilities:\n', predictions_dict['probabilities'], '\n')
+
+test_dataset = clf.Dataset()
+test_dataset.load_dataset(test_path)
+
+
+vectorized_test_data = classifier.vectorize(test_dataset.data)
+test_predictions_dict = classifier.predict(vectorized_test_data)
+
+
+data = {
+    'File': test_dataset.file_names,
+    'Prediction': test_predictions_dict['predictions'],
+    'Probability': test_predictions_dict['probabilities']
+}
+
+succeds = 0
+for i in range(len(data['Prediction'])):
+    print("{}, Class {}, Prob: {:.3f}".format(data['File'][i], data['Prediction'][i], max(data['Probability'][i])))
+    if '10k' in data['File'][i]:
+        if data['Prediction'][i] == 1:
+            succeds += 1
+        else:
+            print('Fail')
+    if '1065' in data['File'][i]:
+        if data['Prediction'][i] == 0:
+            succeds += 1
+        else:
+            print('Fail')
+
+print("Fails:", len(data['Prediction'])-succeds)
+print("Accuracy:", succeds/len(data['Prediction']))
+
+print('Predictions:\n', test_predictions_dict['predictions'], '\n')
+print('Class probabilities:\n', test_predictions_dict['probabilities'], '\n')
