@@ -39,7 +39,7 @@ for i in range(len(data['Prediction'])):
     print("{}, Class {}, Prob: {:.3f}".format(data['File'][i],
                                               data['Prediction'][i], max(data['Probability'][i])))
 
-doc_id = '6a62243714a34dad817ea89599663f7d'
+doc_id = 'fb4f3fef57b04eab8cf8760a65b7f664'
 
 document = file_storage.load_document_model(doc_id)
 doc_text = []
@@ -63,8 +63,9 @@ data = {
 
 succeds = 0
 for i in range(len(data['Prediction'])):
-    if max(data['Probability'][i]) >0.9:
-        print("{} Class {}, Prob: {:.3f}".format(data['String'][i],data['Prediction'][i], max(data['Probability'][i])))
+    if max(data['Probability'][i]) > 0.77:
+        print("Class {}, Prob: {:.3f}, {} ".format(data['Prediction'][i],
+                                                 max(data['Probability'][i]), data['String'][i]))
 cls_label = data['Prediction'][0]
 tm_id = id_dict[cls_label]
 print(id_dict)
