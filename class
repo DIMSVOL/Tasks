@@ -1,0 +1,77 @@
+import Template_classifying.documents_classification as clf
+#from storage import FileStorageBase, LocalFileStorage as lfc
+import pickle
+from storage import file_storage
+
+
+train_path = '/home/dim/PycharmProjects/dxtract-ml/Template_classifying/' \
+             'Samples_labels2'
+test_path = '/home/dim/PycharmProjects/dxtract-ml/Template_classifying/' \
+            'test_data'
+
+
+train_dataset = clf.Dataset()
+id_dict = train_dataset.load_dataset(train_path, is_train=True)
+
+# Initialize classifier and fit vectorizer with raw train data
+classifier = clf.DocumentsClassifier()
+classifier.fit_vectorizer(train_dataset.data)
+
+# Vectorize raw train data and fit classifier
+vectorized_train_data = classifier.vectorize(train_dataset.data)
+classifier.fit_classifier(vectorized_train_data, train_dataset.target)
+print(train_dataset.target)
+
+# Run classifier on train dataset
+predictions_dict = classifier.predict(vectorized_train_data)
+classifier.save_to('/home/dim/PycharmProjects/dxtract-ml/Template_classifying/classifier.clf')
+print('Predictions:\n', predictions_dict['predictions'], '\n')
+print('Class probabilities:\n', predictions_dict['probabilities'], '\n')
+
+data = {
+    'File': train_dataset.file_names,
+    'Prediction': predictions_dict['predictions'],
+    'Probability': predictions_dict['probabilities']
+}
+
+succeds = 0
+for i in range(len(data['Prediction'])):
+    print("{}, Class {}, Prob: {:.3f}".format(data['File'][i],
+                                              data['Prediction'][i], max(data['Probability'][i])))
+
+doc_id = '6a62243714a34dad817ea89599663f7d'
+
+document = file_storage.load_document_model(doc_id)
+doc_text = []
+
+for block in document.pages[0].blocks:
+    block_text = []
+    for line in block.lines:
+        block_text.append(' '.join([word.value for word in line.words]))
+    doc_text += block_text
+print(doc_text)
+
+classifier = clf.DocumentsClassifier.from_model('Template_classifying/classifier.clf')
+vectorized_test_data = classifier.vectorize(doc_text)
+test_predictions_dict = classifier.predict(vectorized_test_data)
+
+data = {
+    'String': doc_text,
+    'Prediction': test_predictions_dict['predictions'],
+    'Probability': test_predictions_dict['probabilities']
+}
+
+succeds = 0
+for i in range(len(data['Prediction'])):
+    if max(data['Probability'][i]) >0.9:
+        print("{} Class {}, Prob: {:.3f}".format(data['String'][i],data['Prediction'][i], max(data['Probability'][i])))
+cls_label = data['Prediction'][0]
+tm_id = id_dict[cls_label]
+print(id_dict)
+print("", tm_id)
+
+#print("Fails:", len(data['Prediction'])-succeds)
+#print("Accuracy:", succeds/len(data['Prediction']))
+
+print('Predictions:\n', test_predictions_dict['predictions'], '\n')
+print('Class probabilities:\n', test_predictions_dict['probabilities'], '\n')
