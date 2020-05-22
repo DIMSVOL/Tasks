@@ -1,0 +1,333 @@
+import os
+import pickle
+from collections import Counter
+
+import numpy as np
+from statistics import mode, mean
+from storage import file_storage
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.model_selection import cross_val_score
+from sklearn.svm import SVC
+from configs.config import get_logger, dc_settings
+
+#logger = get_logger()
+
+
+class DocumentsClassifier:
+    """Use SVM algorithm for documents classification
+
+    Attributes
+    ----------
+    _vectorizer: CountVectorizer
+        vectorizer used for vectorize raw input data
+    _classifier: SVC
+        classifier used for vectorized data classification
+    _class_names: dict
+        Dictionary of class names and it's labels.
+
+    """
+
+    def __init__(self):
+        self._vectorizer = CountVectorizer()
+        self._classifier = SVC(kernel='rbf', probability=True)
+        self._class_names = {}
+
+    def fit_vectorizer(self, raw_data):
+        """Fit vectorizer on raw input data
+
+        Parameters
+        ----------
+        raw_data: list of str
+            Raw input data
+        """
+        self._vectorizer.fit(raw_data)
+
+    def vectorize(self, raw_data):
+        """Vectorize raw input data
+
+        Parameters
+        ----------
+        raw_data: list of str
+            Raw input data
+
+        Returns
+        -------
+        processed_data: scipy.sparse.csr.csr_matrix
+        """
+        processed_data = self._vectorizer.transform(raw_data)
+        return processed_data
+
+    def vectorizer_fit_transform(self, raw_data):
+        """Fit vectorized on raw_data transform it and return vectorized data
+
+        Parameters
+        ----------
+        raw_data: list of str
+            Raw input data
+
+        Returns
+        -------
+        processed_data: scipy.sparse.csr.csr_matrix
+        """
+        self._vectorizer.fit(raw_data)
+        processed_data = self._vectorizer.transform(raw_data)
+        return processed_data
+
+    def fit_classifier(self, data, target):
+        """Fit documents classifier. For correct classifier work, minimum
+        number of elements of each class must be at least 2
+
+        Parameters
+        ----------
+        data: np.ndarray or scipy.sparse.csr.csr_matrix
+            Training dataset of vectorized strings
+        target: list of str or list of int
+            List of class names
+        """
+        # Find unique elements in target and assign unique labels to them
+        unique = self._unique(target)
+        self._class_names = {name: label for label, name in enumerate(unique)}
+
+        # Transform target from class names to corresponding class labels
+        target = [self._class_names[item] for item in target]
+
+        results = np.array([])
+
+        # Coefficients for 'C' classifier parameter
+        c_coeffs = np.array([i / 10 for i in range(1, 11)])
+        counts = Counter(target)  # Number of members of each class in target
+
+        # A value for cross_val_score 'cv' parameter
+        cvs_num = min(counts.values())
+        for c in c_coeffs:
+            # Set parameters to classifier and count cross validation score
+            self._classifier.set_params(C=c)
+            try:
+                results = np.append(
+                    results, 1.0 - np.mean(cross_val_score(
+                        self._classifier, data, target, cv=cvs_num)))
+            except ValueError:
+                raise ValueError('Something goes wrong. Please, check number '
+                                 'of each class elements. '
+                                 'Minimum number must be at least 2')
+
+        # Consider as optimal 'C' parameter value from c_coeffs for which
+        # minimum error rate was counted
+        optimal_c = c_coeffs[np.argmin(results[::-1])]
+        self._classifier.set_params(C=optimal_c)
+        self._classifier.fit(data, target)
+
+    def predict(self, data):
+        """Make predictions for input data
+
+        Parameters
+        ----------
+        data: np.array or scipy.sparse.csr.csr_matrix
+            Dataset of vectorized strings
+
+        Returns
+        -------
+        predictions: dict
+            Dictionary of list of str for 'predictions' key and
+            list of dict for 'probabilities' key corresponds for
+            class names and class probabilities for each object from data
+        """
+
+        # Make class probabilities predictions for input data
+        probas = self._classifier.predict_proba(data)
+        # Swap class names and values from self._class_names dictionary
+        labels = {v: k for k, v in self._class_names.items()}
+        predictions = {
+            'predictions': [labels[np.argmax(proba)] for proba in probas],
+            'probabilities': [[{labels[i]: proba[i]}
+                               for i in range(proba.shape[0])]
+                              for proba in probas]
+        }
+        #print("AAA", self._classifier.classes_)
+        return predictions
+
+    def save_to(self, path):
+        """Pickle DocumentsClassifier instance to file
+
+        Parameters
+        ----------
+        path: str
+            A path where class pickle model will be saved
+        """
+        with open(path, 'wb') as f:
+            pickle.dump(self, f)
+
+    @classmethod
+    def from_model(cls, path):
+        """Load class from pickle model
+
+        Parameters
+        ----------
+        path: str
+            A path to pickled DocumentsClassifier instance
+
+        Returns
+        -------
+        classifier: DocumentsClassifier
+            Unpickled DocumentsClassifier instance
+        """
+        with open(path, 'rb') as f:
+            classifier = pickle.load(f)
+        return classifier
+
+    @staticmethod
+    def _unique(data):
+        """Create a set of unique elements from input data
+
+        Parameters
+        ----------
+        data: Iterable
+            Input data of iterable type
+
+        Returns
+        -------
+        unique: list
+            Unique items from input data
+        """
+        seen = set()
+        unique = [item for item in data if not (item in seen or seen.add(item))]
+        return unique
+
+
+class Dataset:
+    """
+    A support class for handling DocumentClassifier datasets
+
+    Properties
+    ----------
+    data: list of str
+        List of text strings read from documents
+    target: list of int
+        List of class labels for each object in data
+    class_names: list of str
+        List of class names correspond to labels in ascending order
+    file_names: list of str
+        List of file names for each object in data
+    """
+
+    def __init__(self):
+        self._data = []
+        self._class_labels = []
+        self._class_names = []
+        self._file_names = []
+
+    data = property(lambda self: self._data)
+    class_labels = property(lambda self: self._class_labels)
+    class_names = property(lambda self: self._class_names)
+    file_names = property(lambda self: self._file_names)
+
+    def load_dataset(self, path, is_train=False):
+        """Load raw data from selected folder
+
+        Parameters
+        ----------
+        path: str
+            A path to folder with dataset
+
+        is_train: bool
+            A flag for consider dataset as training dataset or dataset for
+            classification
+        """
+        if is_train:
+            # Set class names as names of subfolders in dataset path
+            # subfolders that starts from '-' will be excluded
+            class_names = [name for name in os.listdir(path)
+                           if not name.startswith('-')]
+            for cls_label, cls_name in enumerate(class_names):
+                # Read files from cls_name subfolder and consider it as objects
+                # of cls_label class
+                cls_path = os.path.join(path, cls_name)
+
+                file_names = os.listdir(cls_path)
+                self._class_names += [cls_name] * len(file_names)
+
+                files = [os.path.join(cls_path, f) for f in file_names]
+                self._file_names += file_names
+                # Read content from each file in subfolder and append it to data
+                for f in files:
+                    with open(f) as file:
+                        self._data.append(file.read())
+
+                # Assign to all objects in subfolder the same class label
+                self._class_labels += [cls_name] * len(files)
+        else:
+            # Load dataset that need to be classified
+            self._file_names = os.listdir(path)
+            files = [os.path.join(path, f) for f in self._file_names]
+            for f in files:
+                with open(f) as file:
+                    self._data.append(file.read())
+
+def train():
+    train_path = '/home/dim/PycharmProjects/dxtract-ml/dxtract/doc_classifying/' \
+                 'Samples4'
+    save_clf_path = '/home/dim/PycharmProjects/dxtract-ml/dxtract/' \
+                    'doc_classifying/classifier.clf'
+
+    train_dataset = Dataset()
+    train_dataset.load_dataset(train_path, is_train=True)
+
+    # Initialize classifier and fit vectorizer with raw train data
+    classifier = DocumentsClassifier()
+
+    # Vectorize raw train data and fit classifier
+    vectorized_train_data = classifier.vectorizer_fit_transform(train_dataset.data)
+    classifier.fit_classifier(vectorized_train_data, train_dataset.class_labels)
+    print(train_dataset.class_labels)
+
+    # Run classifier on train dataset
+    predictions_dict = classifier.predict(vectorized_train_data)
+    classifier.save_to(dc_settings['clf_path'])
+
+def classify_document(doc_id):
+
+    document = file_storage.load_document_model(doc_id)
+    doc_text = []
+
+    for block in document.pages[0].blocks:
+        block_text = []
+        for line in block.lines:
+            block_text.append(' '.join([word.value for word in line.words]))
+        doc_text += block_text
+
+    classifier = DocumentsClassifier.from_model(dc_settings['clf_path'])
+    vectorized_test_data = classifier.vectorize(doc_text)
+    predictions_dict = classifier.predict(vectorized_test_data)
+
+    data = {
+        'Prediction': predictions_dict['predictions'],
+        'Probability': predictions_dict['probabilities']
+    }
+
+    max_probs_classes = []
+    tm_id_probs=[]
+    class_probs = []
+    print(data['Prediction'])
+    print(data['Probability'])
+    probs = [max(i) for i. in data['Probability']]
+    max_probs = sorted(probs)[-6:]
+    for i in range(len(data['Prediction'])):
+        if max(data['Probability'][i]) in max_probs:
+            max_probs_classes.append(data['Prediction'][i])
+            class_probs.append(max(data['Probability'][i]))
+            print("Class {}, Prob: {:.3f}".format(data['Prediction'][i],
+                                                  max(data['Probability'][i])))
+
+    tm_id = mode(max_probs_classes)
+    for i in range(len(data['Prediction'])):
+        if data['Prediction'][i] == tm_id and max(data['Probability'][i]) in max_probs:
+            tm_id_probs.append(max(data['Probability'][i]))
+
+    scores = [max_probs[i] for i, cls in enumerate(max_probs_classes)
+              if cls == tm_id]
+    #scores2 = [max(data['Probability'][i]) for i in range(len(data['Prediction']))
+    #          if data['Prediction'][i] == tm_id]
+    print(tm_id)
+    score = mean(scores)
+    print(score)
+    return tm_id, score
